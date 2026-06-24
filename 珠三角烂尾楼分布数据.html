@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>珠三角烂尾楼分布数据</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#070710;--card:#0f0f20;--bdr:#1a1a35;--t1:#eeeef5;--t2:#8888aa;--r:#ff3860;--o:#ff8c42;--g:#ffd166;--t:#4ecdc4;--p:#a78bfa;--pk:#f472b6;--b:#60a5fa;--gn:#34d399;--w:#fb923c}
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,'Noto Sans SC',sans-serif;background:var(--bg);color:var(--t1);overflow-x:hidden;line-height:1.6}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:3px}
+
+/* ===== SPLASH ===== */
+#sp{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;transition:all 1s cubic-bezier(.4,0,.2,1)}
+#sp.out{opacity:0;transform:scale(1.12);pointer-events:none}
+
+/* Animated skyline */
+.sky{position:absolute;bottom:0;left:0;right:0;height:45%;overflow:hidden;opacity:.15}
+.bld{position:absolute;bottom:0;background:linear-gradient(to top,var(--r),var(--o));border-radius:3px 3px 0 0;animation:rise 1.5s ease-out both}
+@keyframes rise{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* Falling buildings animation */
+.fall-wrap{position:absolute;bottom:0;left:0;right:0;height:40%;pointer-events:none;perspective:800px}
+.fall-bld{position:absolute;bottom:0;border-radius:3px 3px 0 0;transform-origin:bottom center;animation:crumble 2.5s ease-in both}
+@keyframes crumble{
+  0%{transform:translateY(0) rotateZ(0);opacity:.6}
+  40%{transform:translateY(-20px) rotateZ(-2deg);opacity:.5}
+  100%{transform:translateY(300px) rotateZ(-25deg);opacity:0}
+}
+
+.sp-content{position:relative;z-index:2;text-align:center;padding:20px}
+
+/* Ring counter */
+.ring{position:relative;width:200px;height:200px;margin:0 auto 32px}
+.ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring .track{fill:none;stroke:var(--bdr);stroke-width:5}
+.ring .prog{fill:none;stroke:url(#sg);stroke-width:5;stroke-linecap:round;stroke-dasharray:565;stroke-dashoffset:565;animation:draw 2s ease-out .8s forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.ring .glow{position:absolute;inset:15px;border-radius:50%;background:radial-gradient(circle,rgba(255,56,96,.06),transparent 70%);animation:gpulse 3s ease-in-out infinite}
+@keyframes gpulse{0%,100%{opacity:.4;transform:scale(1)}50%{opacity:1;transform:scale(1.06)}}
+.ring .nums{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring .n{font-size:64px;font-weight:900;background:linear-gradient(135deg,var(--r),var(--o));-webkit-background-clip:text;-webkit-text-fill-color:transparent;opacity:0;animation:ni .6s ease 1.2s forwards}
+.ring .lb{font-size:13px;color:var(--t2);letter-spacing:6px;opacity:0;animation:ni .5s ease 1.6s forwards}
+@keyframes ni{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+
+.sp-t{font-size:clamp(24px,5vw,40px);font-weight:900;opacity:0;animation:ni .6s ease 1.8s forwards}
+.sp-t b{background:linear-gradient(90deg,var(--r),var(--o),var(--g));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sp-s{color:var(--t2);font-size:14px;margin-top:8px;opacity:0;animation:ni .5s ease 2s forwards}
+.sp-row{display:flex;gap:24px;justify-content:center;margin-top:32px;flex-wrap:wrap;opacity:0;animation:ni .5s ease 2.2s forwards}
+.sp-p{background:rgba(255,255,255,.03);border:1px solid var(--bdr);border-radius:40px;padding:10px 22px;display:flex;align-items:center;gap:8px}
+.sp-p .d{width:7px;height:7px;border-radius:50%}
+.sp-p .v{font-size:18px;font-weight:700}.sp-p .t{font-size:11px;color:var(--t2)}
+.sp-btn{margin-top:36px;padding:14px 48px;border:none;border-radius:50px;background:linear-gradient(135deg,var(--r),var(--o));color:#fff;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:3px;opacity:0;animation:ni .5s ease 2.5s forwards;transition:all .3s}
+.sp-btn:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 12px 36px rgba(255,56,96,.3)}
+
+/* ===== MAIN ===== */
+#app{opacity:0;transition:opacity .7s ease .2s}#app.on{opacity:1}
+
+/* Nav */
+.nav{position:sticky;top:0;z-index:90;height:50px;background:rgba(7,7,16,.9);backdrop-filter:blur(20px);border-bottom:1px solid var(--bdr);display:flex;align-items:center;padding:0 24px;gap:4px}
+.nav .lg{font-weight:800;font-size:14px;background:linear-gradient(135deg,var(--r),var(--o));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-right:auto}
+.nav a{padding:6px 12px;border-radius:7px;font-size:11px;color:var(--t2);text-decoration:none;transition:all .2s}
+.nav a:hover,.nav a.hi{color:var(--t1);background:rgba(255,255,255,.04)}
+
+/* Hero */
+.hero{padding:64px 24px 40px;text-align:center}
+.hero .badge{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:30px;background:rgba(255,56,96,.06);border:1px solid rgba(255,56,96,.15);color:var(--r);font-size:11px;font-weight:600;margin-bottom:16px}
+.hero .badge .dot{width:5px;height:5px;border-radius:50%;background:var(--r);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.hero h1{font-size:clamp(28px,5vw,48px);font-weight:900;line-height:1.15;margin-bottom:12px}
+.hero h1 em{font-style:normal;background:linear-gradient(135deg,var(--r),var(--o),var(--g));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero p{color:var(--t2);font-size:14px;max-width:520px;margin:0 auto}
+
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;max-width:800px;margin:-12px auto 0;padding:0 24px;position:relative;z-index:2}
+.kpi{background:var(--card);border:1px solid var(--bdr);border-radius:12px;padding:20px 14px;text-align:center;position:relative;overflow:hidden;transition:all .3s}
+.kpi:hover{transform:translateY(-3px);box-shadow:0 12px 30px rgba(0,0,0,.3)}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.kpi:nth-child(1)::before{background:linear-gradient(90deg,var(--r),var(--o))}
+.kpi:nth-child(2)::before{background:linear-gradient(90deg,var(--t),var(--b))}
+.kpi:nth-child(3)::before{background:linear-gradient(90deg,var(--g),var(--o))}
+.kpi:nth-child(4)::before{background:linear-gradient(90deg,var(--p),var(--pk))}
+.kpi .i{font-size:22px;margin-bottom:4px}.kpi .v{font-size:28px;font-weight:900}.kpi .t{font-size:11px;color:var(--t2);margin-top:2px}
+
+/* Section */
+.sec{max-width:880px;margin:0 auto;padding:48px 24px}
+.sh{display:flex;align-items:center;gap:10px;margin-bottom:5px}
+.si{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.sh h2{font-size:20px;font-weight:800}
+.sd{color:var(--t2);font-size:12px;margin-bottom:20px;padding-left:46px}
+
+/* City cards */
+.cg{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.cc{background:var(--card);border:1px solid var(--bdr);border-radius:10px;padding:16px 10px;text-align:center;cursor:pointer;transition:all .3s;position:relative;overflow:hidden}
+.cc:hover{transform:translateY(-3px);border-color:var(--r)}
+.cc.act{border-color:var(--r);box-shadow:0 0 16px rgba(255,56,96,.12)}
+.cc .e{font-size:24px;display:block;margin-bottom:3px}
+.cc .nm{font-size:13px;font-weight:700}
+.cc .ct{font-size:24px;font-weight:900;margin:2px 0}
+.cc .ut{font-size:9px;color:var(--t2)}
+.cc .bar{position:absolute;bottom:0;left:0;height:2px;transition:width .6s}
+
+/* Donut chart */
+.donut-row{display:flex;gap:32px;align-items:center;flex-wrap:wrap;justify-content:center}
+.donut-svg{width:220px;height:220px;flex-shrink:0}
+.donut-legend{display:flex;flex-direction:column;gap:6px}
+.dl{display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;transition:all .2s;padding:3px 6px;border-radius:6px}
+.dl:hover{background:rgba(255,255,255,.04)}
+.dl .dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+.dl .nm{min-width:36px}.dl .n{font-weight:700;margin-left:auto;min-width:24px;text-align:right}
+
+/* Bars */
+.hbs{display:flex;flex-direction:column;gap:8px}
+.hr{display:flex;align-items:center;gap:10px;cursor:pointer;transition:all .2s}
+.hr:hover{transform:translateX(3px)}
+.hr .city{width:60px;font-size:12px;font-weight:700;text-align:right;flex-shrink:0}
+.hr .trk{flex:1;height:30px;background:var(--card);border:1px solid var(--bdr);border-radius:8px;overflow:hidden}
+.hr .fl{height:100%;border-radius:8px;display:flex;align-items:center;justify-content:flex-end;padding-right:10px;font-size:12px;font-weight:800;color:#fff;min-width:36px;transition:width 1.2s cubic-bezier(.22,.61,.36,1)}
+
+/* Timeline */
+.tlc{display:flex;align-items:flex-end;gap:2px;height:160px;padding:0 4px}
+.tc{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;cursor:pointer;position:relative}
+.tc .bar{width:100%;border-radius:3px 3px 0 0;transition:all .3s;min-height:2px}
+.tc:hover .bar{filter:brightness(1.4);transform:scaleX(1.2)}
+.tc .tip{display:none;position:absolute;bottom:calc(100% + 5px);left:50%;transform:translateX(-50%);background:#151530;border:1px solid var(--bdr);border-radius:7px;padding:5px 10px;font-size:10px;white-space:nowrap;z-index:10}
+.tc:hover .tip{display:block}
+.tll{display:flex;gap:2px;padding:5px 4px 0}
+.tll span{flex:1;text-align:center;font-size:8px;color:var(--t2)}
+
+/* Cause */
+.cgr{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
+.ccd{background:var(--card);border:1px solid var(--bdr);border-radius:10px;padding:14px 16px;display:flex;align-items:center;gap:12px;transition:all .3s}
+.ccd:hover{transform:translateY(-2px)}
+.ccd .rk{font-size:20px;font-weight:900;opacity:.2;min-width:24px}
+.ccd .inf{flex:1;min-width:0}
+.ccd .nm{font-size:12px;font-weight:600;margin-bottom:4px}
+.ccd .bg{height:4px;background:var(--bg);border-radius:2px;overflow:hidden}
+.ccd .bf{height:100%;border-radius:2px;transition:width 1s ease}
+.ccd .num{font-size:18px;font-weight:800;min-width:30px;text-align:right}
+
+/* Map */
+#mapSec{max-width:880px;margin:0 auto;padding:48px 24px}
+.mf{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px}
+.mf button{padding:5px 12px;border-radius:16px;border:1px solid var(--bdr);background:transparent;color:var(--t2);font-size:10px;cursor:pointer;transition:all .2s;font-family:inherit}
+.mf button:hover{color:var(--t1);border-color:rgba(255,255,255,.1)}
+.mf button.on{color:#fff;border-color:var(--r)}
+#map{width:100%;height:540px;border-radius:12px;border:1px solid var(--bdr);overflow:hidden}
+
+/* Table */
+.tw{border-radius:12px;border:1px solid var(--bdr);overflow:hidden}
+.tt{display:flex;gap:8px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--bdr);flex-wrap:wrap;align-items:center}
+.tt input,.tt select{padding:8px 12px;border-radius:8px;border:1px solid var(--bdr);background:var(--bg);color:var(--t1);font-size:11px;font-family:inherit;outline:none}
+.tt input:focus{border-color:var(--r)}
+.tt input{flex:1;min-width:160px}
+.tt .cnt{font-size:10px;color:var(--t2);margin-left:auto}
+.ts{max-height:440px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:11px}
+thead{position:sticky;top:0;z-index:2}
+th{background:var(--card);padding:10px 12px;text-align:left;font-weight:600;color:var(--t2);font-size:9px;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid var(--bdr);cursor:pointer;user-select:none}
+th:hover{color:var(--t1)}th.so{color:var(--r)}
+td{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.02)}
+tr:hover td{background:rgba(255,56,96,.02)}
+.bg-r{display:inline-block;padding:2px 8px;border-radius:14px;font-size:9px;font-weight:600;background:rgba(255,56,96,.1);color:var(--r)}
+.bg-o{display:inline-block;padding:2px 8px;border-radius:14px;font-size:9px;font-weight:600;background:rgba(255,140,66,.1);color:var(--o)}
+.bg-g{display:inline-block;padding:2px 8px;border-radius:14px;font-size:9px;font-weight:600;background:rgba(78,205,196,.1);color:var(--t)}
+.tg{display:inline-block;padding:1px 6px;border-radius:4px;font-size:9px;background:rgba(167,139,250,.08);color:var(--p);margin:1px}
+
+.ft{text-align:center;padding:36px 24px;color:var(--t2);font-size:10px;border-top:1px solid var(--bdr)}
+
+/* Reveal */
+.rv{opacity:0;transform:translateY(24px);transition:all .6s cubic-bezier(.4,0,.2,1)}
+.rv.vis{opacity:1;transform:translateY(0)}
+
+@media(max-width:768px){
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .cg{grid-template-columns:repeat(3,1fr)}
+  #map{height:360px}
+  .donut-row{flex-direction:column}
+}
+</style>
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="sp">
+  <div class="fall-wrap" id="fallWrap"></div>
+  <div class="sp-content">
+    <div class="ring">
+      <svg viewBox="0 0 200 200"><defs><linearGradient id="sg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#ff3860"/><stop offset="100%" stop-color="#ff8c42"/></linearGradient></defs><circle class="track" cx="100" cy="100" r="90"/><circle class="prog" cx="100" cy="100" r="90"/></svg>
+      <div class="glow"></div>
+      <div class="nums"><div class="n" id="spN">0</div><div class="lb">烂 尾 项 目</div></div>
+    </div>
+    <div class="sp-t"><b>珠三角烂尾楼分布数据</b></div>
+    <div class="sp-s">覆盖 9 座城市 · 数据截至 2026 年 6 月</div>
+    <div class="sp-row">
+      <div class="sp-p"><div class="d" style="background:var(--r)"></div><div><div class="v">9</div><div class="t">涉及城市</div></div></div>
+      <div class="sp-p"><div class="d" style="background:var(--t)"></div><div><div class="v">33年</div><div class="t">时间跨度</div></div></div>
+      <div class="sp-p"><div class="d" style="background:var(--g)"></div><div><div class="v">2021</div><div class="t">停工高峰</div></div></div>
+    </div>
+    <button class="sp-btn" onclick="go()">探 索 数 据</button>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <nav class="nav">
+    <span class="lg">🏗️ 珠三角烂尾楼</span>
+    <a href="#hero" class="hi">概览</a>
+    <a href="#sCity">城市</a>
+    <a href="#sDonut">占比</a>
+    <a href="#sBar">排名</a>
+    <a href="#sTL">年份</a>
+    <a href="#sCause">成因</a>
+    <a href="#mapSec">地图</a>
+    <a href="#sTbl">明细</a>
+  </nav>
+
+  <div class="hero" id="hero">
+    <div class="badge"><span class="dot"></span>公开数据可视化</div>
+    <h1>珠三角地区<br><em>烂尾楼分布全景</em></h1>
+    <p>基于公开报道、法拍公告及住建局公示整理，覆盖 9 座城市，共计 165 个烂尾/停工项目</p>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi rv"><div class="i">🏚️</div><div class="v" data-c="165">0</div><div class="t">烂尾项目</div></div>
+    <div class="kpi rv"><div class="i">🏙️</div><div class="v" data-c="9">0</div><div class="t">涉及城市</div></div>
+    <div class="kpi rv"><div class="i">📅</div><div class="v" data-c="2021">0</div><div class="t">停工高峰</div></div>
+    <div class="kpi rv"><div class="i">💰</div><div class="v" data-c="41">0</div><div class="t">高峰年数量</div></div>
+  </div>
+
+  <div class="sec rv" id="sCity">
+    <div class="sh"><div class="si" style="background:rgba(255,56,96,.07)">📊</div><h2>各城市分布</h2></div>
+    <div class="sd">点击卡片联动筛选下方地图与数据表</div>
+    <div class="cg" id="cg"></div>
+  </div>
+
+  <div class="sec rv" id="sDonut">
+    <div class="sh"><div class="si" style="background:rgba(255,209,102,.07)">🍩</div><h2>城市占比</h2></div>
+    <div class="sd">广州占比最高达 18.2%，深圳和佛山并列第二</div>
+    <div class="donut-row">
+      <svg class="donut-svg" viewBox="0 0 200 200" id="donut"></svg>
+      <div class="donut-legend" id="dleg"></div>
+    </div>
+  </div>
+
+  <div class="sec rv" id="sBar">
+    <div class="sh"><div class="si" style="background:rgba(78,205,196,.07)">📈</div><h2>城市排名</h2></div>
+    <div class="sd">广州 30 个项目居首，深圳、佛山各 25 个紧随其后</div>
+    <div class="hbs" id="hbs"></div>
+  </div>
+
+  <div class="sec rv" id="sTL">
+    <div class="sh"><div class="si" style="background:rgba(255,140,66,.07)">📅</div><h2>停工年份分布</h2></div>
+    <div class="sd">2021 年是停工高峰期，与房企债务危机集中爆发密切相关</div>
+    <div class="tlc" id="tlc"></div>
+    <div class="tll" id="tll"></div>
+  </div>
+
+  <div class="sec rv" id="sCause">
+    <div class="sh"><div class="si" style="background:rgba(167,139,250,.07)">🔍</div><h2>核心成因分析</h2></div>
+    <div class="sd">资金链断裂是最普遍成因，恒大集团债务危机影响最为深远</div>
+    <div class="cgr" id="cgr"></div>
+  </div>
+
+  <div id="mapSec" class="rv">
+    <div class="sh"><div class="si" style="background:rgba(96,165,250,.07)">🗺️</div><h2>珠三角烂尾楼分布地图</h2></div>
+    <div class="sd">每个标记代表一个烂尾项目，颜色区分城市，点击查看详情</div>
+    <div class="mf" id="mf"></div>
+    <div id="map"></div>
+  </div>
+
+  <div class="sec rv" id="sTbl">
+    <div class="sh"><div class="si" style="background:rgba(244,114,182,.07)">📋</div><h2>全量数据明细</h2></div>
+    <div class="sd">支持搜索、筛选、排序</div>
+    <div class="tw">
+      <div class="tt">
+        <input id="tS" placeholder="🔍 搜索项目名 / 地址 / 成因..."/>
+        <select id="tCF"><option value="">全部城市</option></select>
+        <select id="tSF"><option value="">全部状态</option><option>停工</option><option>烂尾</option><option>部分停工</option><option>复工</option></select>
+        <span class="cnt" id="tCnt">165 条</span>
+      </div>
+      <div class="ts">
+        <table><thead><tr>
+          <th data-k="id">#</th><th data-k="city">城市</th><th data-k="area">区域</th>
+          <th data-k="name">项目名称</th><th data-k="year">停工年份</th>
+          <th data-k="status">现状</th><th data-k="cause">核心成因</th>
+        </tr></thead><tbody id="tB"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div class="ft">数据来源：公开报道、法拍公告、住建局公示 · 仅供参考 · 豆包 AI 生成</div>
+</div>
+
+<script>
+const D=[{"id": 1, "city": "广州", "area": "天河区", "name": "中水大厦", "addr": "林和西路", "year": 1999, "status": "封顶烂尾", "cause": "债务5.6亿多次流拍", "lat": 23.1064, "lng": 113.26557}, {"id": 2, "city": "广州", "area": "天河区", "name": "哥弟大厦", "addr": "珠江新城B2-11地块", "year": 2016, "status": "停工", "cause": "股东纠纷+设计问题", "lat": 23.11627, "lng": 113.26339}, {"id": 3, "city": "广州", "area": "越秀区", "name": "合银广场", "addr": "环市东路", "year": 1998, "status": "停工", "cause": "历史债务纠纷", "lat": 23.1155, "lng": 113.25009}, {"id": 4, "city": "广州", "area": "增城区", "name": "荔湖别墅群", "addr": "荔湖畔", "year": 2004, "status": "烂尾20年", "cause": "资金链断裂+产权纠纷", "lat": 23.1124, "lng": 113.34072}, {"id": 5, "city": "广州", "area": "花都区", "name": "泰湖山庄", "addr": "花东镇花都大道北", "year": 2004, "status": "2026年7月拟复工", "cause": "资金链断裂，绿城代建", "lat": 23.21495, "lng": 113.2321}, {"id": 6, "city": "广州", "area": "黄埔区", "name": "澳洲山庄", "addr": "九龙大道广汕公路以北", "year": 1998, "status": "烂尾27年", "cause": "开发商破产+债务复杂", "lat": 23.11744, "lng": 113.31449}, {"id": 7, "city": "广州", "area": "黄埔区", "name": "广建鱼珠湾项目", "addr": "中山大道", "year": 2020, "status": "基坑阶段停工", "cause": "资金链断裂", "lat": 23.11348, "lng": 113.31355}, {"id": 8, "city": "广州", "area": "白云区", "name": "竹料新城", "addr": "钟落潭镇竹料片区", "year": 1998, "status": "165栋全部停工", "cause": "蓝印户口取消+资金链断裂", "lat": 23.17491, "lng": 113.24368}, {"id": 9, "city": "广州", "area": "黄埔区", "name": "南湾村旧改F01地块", "addr": "黄埔区黄埔街道", "year": 2024, "status": "停工后复工", "cause": "原改造主体资金链断裂", "lat": 23.11806, "lng": 113.32083}, {"id": 10, "city": "广州", "area": "南沙区", "name": "万顷沙镇烂尾别墅群", "addr": "万顷沙镇新垦片区", "year": 2005, "status": "停工", "cause": "开发商破产", "lat": 23.03579, "lng": 113.28124}, {"id": 11, "city": "广州", "area": "番禺区", "name": "沙湾镇烂尾商业体", "addr": "沙湾大道", "year": 2014, "status": "停工", "cause": "资金链断裂", "lat": 23.06565, "lng": 113.26663}, {"id": 12, "city": "广州", "area": "花都区", "name": "狮岭镇烂尾皮具城", "addr": "狮岭大道", "year": 2012, "status": "停工", "cause": "行业低迷+资金链断裂", "lat": 23.20362, "lng": 113.23645}, {"id": 13, "city": "广州", "area": "增城区", "name": "新塘镇烂尾写字楼群", "addr": "新塘大道东", "year": 2017, "status": "停工", "cause": "开发商债务危机", "lat": 23.10792, "lng": 113.33535}, {"id": 14, "city": "广州", "area": "从化区", "name": "太平镇烂尾文旅项目", "addr": "太平镇神岗片区", "year": 2019, "status": "停工", "cause": "资金链断裂", "lat": 23.23237, "lng": 113.30175}, {"id": 15, "city": "广州", "area": "海珠区", "name": "琶洲烂尾商业项目", "addr": "琶洲大道", "year": 2018, "status": "停工", "cause": "开发商资金链断裂", "lat": 23.08461, "lng": 113.26807}, {"id": 16, "city": "广州", "area": "荔湾区", "name": "芳村烂尾茶叶城", "addr": "芳村大道", "year": 2013, "status": "停工", "cause": "行业调整+资金链断裂", "lat": 23.12091, "lng": 113.23295}, {"id": 17, "city": "广州", "area": "天河区", "name": "员村烂尾公寓项目", "addr": "员村二横路", "year": 2019, "status": "停工", "cause": "开发商债务危机", "lat": 23.10566, "lng": 113.26251}, {"id": 18, "city": "广州", "area": "白云区", "name": "嘉禾望岗烂尾商业体", "addr": "嘉禾望岗地铁站旁", "year": 2017, "status": "停工", "cause": "资金链断裂", "lat": 23.16538, "lng": 113.24709}, {"id": 19, "city": "广州", "area": "黄埔区", "name": "科学城烂尾写字楼", "addr": "科学大道", "year": 2016, "status": "停工", "cause": "开发商破产", "lat": 23.12249, "lng": 113.31833}, {"id": 20, "city": "广州", "area": "南沙区", "name": "黄阁镇烂尾住宅项目", "addr": "黄阁大道", "year": 2018, "status": "停工", "cause": "资金链断裂", "lat": 23.02624, "lng": 113.27595}, {"id": 21, "city": "广州", "area": "番禺区", "name": "大石镇烂尾商业广场", "addr": "大石朝阳东路", "year": 2015, "status": "停工", "cause": "开发商债务危机", "lat": 23.07135, "lng": 113.27637}, {"id": 22, "city": "广州", "area": "花都区", "name": "新华街烂尾酒店项目", "addr": "建设北路", "year": 2014, "status": "停工", "cause": "资金链断裂", "lat": 23.21796, "lng": 113.24015}, {"id": 23, "city": "广州", "area": "增城区", "name": "石滩镇烂尾别墅群", "addr": "石滩镇三江片区", "year": 2006, "status": "停工", "cause": "开发商破产", "lat": 23.10375, "lng": 113.34204}, {"id": 24, "city": "广州", "area": "从化区", "name": "街口街烂尾商业体", "addr": "街口大道", "year": 2012, "status": "停工", "cause": "资金链断裂", "lat": 23.22302, "lng": 113.29811}, {"id": 25, "city": "广州", "area": "海珠区", "name": "南洲烂尾公寓项目", "addr": "南洲路", "year": 2018, "status": "停工", "cause": "开发商债务危机", "lat": 23.09754, "lng": 113.27577}, {"id": 26, "city": "广州", "area": "荔湾区", "name": "黄沙烂尾水产市场", "addr": "黄沙大道", "year": 2011, "status": "停工", "cause": "规划调整+资金链断裂", "lat": 23.12291, "lng": 113.23059}, {"id": 27, "city": "广州", "area": "天河区", "name": "龙洞烂尾商业项目", "addr": "龙洞步行街", "year": 2016, "status": "停工", "cause": "开发商破产", "lat": 23.10378, "lng": 113.26896}, {"id": 28, "city": "广州", "area": "白云区", "name": "太和镇烂尾物流园", "addr": "太和镇谢家庄片区", "year": 2019, "status": "停工", "cause": "资金链断裂", "lat": 23.17601, "lng": 113.23621}, {"id": 29, "city": "广州", "area": "黄埔区", "name": "南岗烂尾商业体", "addr": "南岗地铁站旁", "year": 2017, "status": "停工", "cause": "开发商债务危机", "lat": 23.1266, "lng": 113.32593}, {"id": 30, "city": "广州", "area": "南沙区", "name": "万顷沙镇烂尾农业文旅项目", "addr": "万顷沙镇红洋村", "year": 2020, "status": "停工", "cause": "资金链断裂", "lat": 23.03174, "lng": 113.27445}, {"id": 31, "city": "深圳", "area": "宝安区", "name": "共乐别墅", "addr": "西乡街道共乐社区", "year": 1995, "status": "84栋别墅烂尾", "cause": "海沙劣质钢筋+资金链断裂", "lat": 22.56446, "lng": 114.02049}, {"id": 32, "city": "深圳", "area": "罗湖区", "name": "金钻豪园", "addr": "罗湖安居房项目", "year": 2019, "status": "断续停工", "cause": "历史遗留问题+资金不足", "lat": 22.52231, "lng": 114.09687}, {"id": 33, "city": "深圳", "area": "龙岗区", "name": "世茂深港国际中心", "addr": "龙城街道大运新城", "year": 2021, "status": "停工", "cause": "世茂集团债务危机", "lat": 22.55692, "lng": 114.11293}, {"id": 34, "city": "深圳", "area": "坪山区", "name": "世茂广场二期", "addr": "坪山大道", "year": 2024, "status": "再次停工", "cause": "资金链断裂", "lat": 22.54337, "lng": 114.14978}, {"id": 35, "city": "深圳", "area": "福田区", "name": "万科万云大厦", "addr": "福田区安托山片区", "year": 2022, "status": "基坑停工", "cause": "万科财务危机", "lat": 22.53425, "lng": 114.06405}, {"id": 36, "city": "深圳", "area": "龙华区", "name": "福罗拉山庄", "addr": "民治街道民荣北路", "year": 1993, "status": "烂尾30年", "cause": "资金链断裂", "lat": 22.56624, "lng": 114.07596}, {"id": 37, "city": "深圳", "area": "福田区", "name": "岗厦汇花园", "addr": "福田街道福华路以南", "year": 2019, "status": "已动工未竣工", "cause": "资金链断裂", "lat": 22.53063, "lng": 114.07368}, {"id": 38, "city": "深圳", "area": "福田区", "name": "海德园A区", "addr": "香蜜湖街道北环大道以南", "year": 2019, "status": "已动工未竣工", "cause": "资金链断裂", "lat": 22.53792, "lng": 114.0724}, {"id": 39, "city": "深圳", "area": "南山区", "name": "湾尚骏玺", "addr": "南山街道", "year": 2020, "status": "已动工未竣工", "cause": "资金链断裂", "lat": 22.51394, "lng": 114.0256}, {"id": 40, "city": "深圳", "area": "宝安区", "name": "沙井烂尾商业城", "addr": "沙井街道新沙路", "year": 2016, "status": "停工", "cause": "开发商破产", "lat": 22.55568, "lng": 114.01552}, {"id": 41, "city": "深圳", "area": "龙岗区", "name": "布吉烂尾写字楼群", "addr": "布吉街道中兴路", "year": 2017, "status": "停工", "cause": "资金链断裂", "lat": 22.55566, "lng": 114.12649}, {"id": 42, "city": "深圳", "area": "龙华区", "name": "观澜烂尾住宅项目", "addr": "观澜街道高尔夫大道", "year": 2018, "status": "停工", "cause": "开发商债务危机", "lat": 22.56581, "lng": 114.0727}, {"id": 43, "city": "深圳", "area": "坪山区", "name": "坑梓烂尾商业体", "addr": "坑梓街道人民路", "year": 2015, "status": "停工", "cause": "资金链断裂", "lat": 22.55697, "lng": 114.15114}, {"id": 44, "city": "深圳", "area": "光明区", "name": "公明烂尾产业园", "addr": "公明街道南环大道", "year": 2019, "status": "停工", "cause": "开发商破产", "lat": 22.59492, "lng": 114.04505}, {"id": 45, "city": "深圳", "area": "大鹏新区", "name": "葵涌烂尾文旅项目", "addr": "葵涌街道官湖片区", "year": 2020, "status": "停工", "cause": "资金链断裂", "lat": 22.53878, "lng": 114.17947}, {"id": 46, "city": "深圳", "area": "罗湖区", "name": "笋岗烂尾商业项目", "addr": "笋岗街道桃园路", "year": 2016, "status": "停工", "cause": "开发商债务危机", "lat": 22.53775, "lng": 114.08357}, {"id": 47, "city": "深圳", "area": "福田区", "name": "梅林烂尾公寓项目", "addr": "梅林街道梅华路", "year": 2018, "status": "停工", "cause": "资金链断裂", "lat": 22.53579, "lng": 114.06598}, {"id": 48, "city": "深圳", "area": "南山区", "name": "西丽烂尾写字楼", "addr": "西丽街道沙河西路", "year": 2017, "status": "停工", "cause": "开发商破产", "lat": 22.51875, "lng": 114.02646}, {"id": 49, "city": "深圳", "area": "宝安区", "name": "福永烂尾住宅项目", "addr": "福永街道宝安大道", "year": 2019, "status": "停工", "cause": "资金链断裂", "lat": 22.55909, "lng": 114.02578}, {"id": 50, "city": "深圳", "area": "龙岗区", "name": "平湖烂尾商业广场", "addr": "平湖街道双拥街", "year": 2015, "status": "停工", "cause": "开发商债务危机", "lat": 22.56799, "lng": 114.12538}, {"id": 51, "city": "深圳", "area": "龙华区", "name": "民治烂尾商业体", "addr": "民治街道民治大道", "year": 2016, "status": "停工", "cause": "资金链断裂", "lat": 22.57558, "lng": 114.06466}, {"id": 52, "city": "深圳", "area": "坪山区", "name": "坪山街道烂尾住宅项目", "addr": "坪山街道东纵路", "year": 2018, "status": "停工", "cause": "开发商破产", "lat": 22.54842, "lng": 114.14294}, {"id": 53, "city": "深圳", "area": "光明区", "name": "光明街道烂尾商业项目", "addr": "光明街道光明大道", "year": 2019, "status": "停工", "cause": "资金链断裂", "lat": 22.58624, "lng": 114.05455}, {"id": 54, "city": "深圳", "area": "大鹏新区", "name": "大鹏街道烂尾酒店项目", "addr": "大鹏街道迎宾路", "year": 2017, "status": "停工", "cause": "开发商债务危机", "lat": 22.54732, "lng": 114.18793}, {"id": 55, "city": "深圳", "area": "前海合作区", "name": "前海湾烂尾商业综合体", "addr": "前海湾片区", "year": 2021, "status": "停工", "cause": "资金链断裂", "lat": 22.50448, "lng": 114.01675}, {"id": 56, "city": "佛山", "area": "禅城区", "name": "莲塘翡翠湾", "addr": "季华路智慧新城地铁站旁", "year": 2017, "status": "停工拟改酒店", "cause": "历史债务问题", "lat": 23.00068, "lng": 113.12397}, {"id": 57, "city": "佛山", "area": "禅城区", "name": "佛大旁烂尾楼", "addr": "江湾一路", "year": 1994, "status": "烂尾30年", "cause": "规划冲突+债务", "lat": 23.00005, "lng": 113.12564}, {"id": 58, "city": "佛山", "area": "顺德区", "name": "真美花园", "addr": "北滘镇工业大道中发西路5号", "year": 2015, "status": "建成未交付法拍", "cause": "开发商资金链断裂", "lat": 22.95328, "lng": 113.13497}, {"id": 59, "city": "佛山", "area": "高明区", "name": "碧荷湾", "addr": "荷城街道沧江路", "year": 2014, "status": "2025年12月接盘更名", "cause": "资金链断裂", "lat": 23.01576, "lng": 113.03392}, {"id": 60, "city": "佛山", "area": "禅城区", "name": "莲塘村商业项目", "addr": "张槎街道莲塘村", "year": 2018, "status": "停工拟引入温德姆花园酒店", "cause": "资金链断裂", "lat": 23.00151, "lng": 113.12191}, {"id": 61, "city": "佛山", "area": "禅城区", "name": "威达广场", "addr": "禅西片区", "year": 2017, "status": "2024年接盘2025年交付", "cause": "资金链断裂", "lat": 23.00036, "lng": 113.12696}, {"id": 62, "city": "佛山", "area": "禅城区", "name": "南国大酒店", "addr": "禅城区核心地段", "year": 2013, "status": "停工拟无偿收回", "cause": "开发商破产", "lat": 22.99582, "lng": 113.11833}, {"id": 63, "city": "佛山", "area": "禅城区", "name": "锦恒广场", "addr": "季华路沿线", "year": 2014, "status": "2024年接手拟动工", "cause": "资金链断裂", "lat": 22.99706, "lng": 113.12403}, {"id": 64, "city": "佛山", "area": "禅城区", "name": "高登国际广场", "addr": "张槎街道", "year": 2019, "status": "2024年更名备案", "cause": "资金链断裂", "lat": 23.00798, "lng": 113.12794}, {"id": 65, "city": "佛山", "area": "顺德区", "name": "容桂烂尾商业城", "addr": "容桂街道桂洲大道", "year": 2016, "status": "停工", "cause": "开发商债务危机", "lat": 22.95624, "lng": 113.14693}, {"id": 66, "city": "佛山", "area": "顺德区", "name": "乐从烂尾写字楼群", "addr": "乐从镇佛山大道", "year": 2017, "status": "停工", "cause": "资金链断裂", "lat": 22.95791, "lng": 113.13452}, {"id": 67, "city": "佛山", "area": "南海区", "name": "桂城烂尾公寓项目", "addr": "桂城街道南海大道", "year": 2018, "status": "停工", "cause": "开发商破产", "lat": 23.05179, "lng": 113.1078}, {"id": 68, "city": "佛山", "area": "南海区", "name": "大沥烂尾商业广场", "addr": "大沥镇广佛路", "year": 2015, "status": "停工", "cause": "资金链断裂", "lat": 23.05507, "lng": 113.09679}, {"id": 69, "city": "佛山", "area": "南海区", "name": "里水烂尾住宅项目", "addr": "里水镇里水大道", "year": 2019, "status": "停工", "cause": "开发商债务危机", "lat": 23.04415, "lng": 113.09385}, {"id": 70, "city": "佛山", "area": "高明区", "name": "杨和烂尾文旅项目", "addr": "杨和镇皂幕山片区", "year": 2020, "status": "停工", "cause": "资金链断裂", "lat": 23.01636, "lng": 113.04168}, {"id": 71, "city": "佛山", "area": "高明区", "name": "更合烂尾商业体", "addr": "更合镇合水大道", "year": 2014, "status": "停工", "cause": "开发商破产", "lat": 23.02215, "lng": 113.03622}, {"id": 72, "city": "佛山", "area": "三水区", "name": "西南烂尾酒店项目", "addr": "西南街道广海大道", "year": 2013, "status": "停工", "cause": "资金链断裂", "lat": 23.08554, "lng": 113.07348}, {"id": 73, "city": "佛山", "area": "三水区", "name": "乐平烂尾产业园", "addr": "乐平镇乐平大道", "year": 2019, "status": "停工", "cause": "开发商债务危机", "lat": 23.07206, "lng": 113.08434}, {"id": 74, "city": "佛山", "area": "三水区", "name": "大塘烂尾住宅项目", "addr": "大塘镇大塘大道", "year": 2018, "status": "停工", "cause": "资金链断裂", "lat": 23.08386, "lng": 113.08083}, {"id": 75, "city": "佛山", "area": "顺德区", "name": "陈村烂尾商业项目", "addr": "陈村镇佛陈路", "year": 2016, "status": "停工", "cause": "开发商破产", "lat": 22.9532, "lng": 113.14613}, {"id": 76, "city": "佛山", "area": "顺德区", "name": "均安烂尾写字楼", "addr": "均安镇百安北路", "year": 2017, "status": "停工", "cause": "资金链断裂", "lat": 22.96535, "lng": 113.14132}, {"id": 77, "city": "佛山", "area": "南海区", "name": "丹灶烂尾商业广场", "addr": "丹灶镇桂丹路", "year": 2015, "status": "停工", "cause": "开发商债务危机", "lat": 23.04693, "lng": 113.10638}, {"id": 78, "city": "佛山", "area": "南海区", "name": "西樵烂尾文旅项目", "addr": "西樵镇西樵山片区", "year": 2020, "status": "停工", "cause": "资金链断裂", "lat": 23.05638, "lng": 113.09536}, {"id": 79, "city": "佛山", "area": "高明区", "name": "荷城烂尾公寓项目", "addr": "荷城街道文华路", "year": 2018, "status": "停工", "cause": "开发商破产", "lat": 23.02448, "lng": 113.04615}, {"id": 80, "city": "佛山", "area": "三水区", "name": "南山烂尾商业体", "addr": "南山镇漫江大道", "year": 2014, "status": "停工", "cause": "资金链断裂", "lat": 23.07447, "lng": 113.08688}, {"id": 81, "city": "东莞", "area": "多镇区", "name": "恒大绿洲", "addr": "东莞恒大绿洲各项目", "year": 2021, "status": "全面停工", "cause": "恒大集团债务危机", "lat": 23.02497, "lng": 113.7561}, {"id": 82, "city": "东莞", "area": "水乡片区", "name": "奥园誉景湾", "addr": "水乡大道沿线", "year": 2021, "status": "停工", "cause": "资金链断裂+销售低迷", "lat": 22.97731, "lng": 113.72689}, {"id": 83, "city": "东莞", "area": "塘厦镇", "name": "卓越蔚蓝岸", "addr": "塘厦镇桥陇社区", "year": 2022, "status": "停工", "cause": "开发商资金链断裂", "lat": 22.96497, "lng": 113.79627}, {"id": 84, "city": "东莞", "area": "凤岗镇", "name": "恒大绿洲花园", "addr": "凤岗镇官井头村", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 22.96595, "lng": 113.82574}, {"id": 85, "city": "东莞", "area": "清溪镇", "name": "融创清溪壹号", "addr": "清溪镇鹿湖东路", "year": 2021, "status": "停工", "cause": "融创集团债务危机", "lat": 22.97936, "lng": 113.80688}, {"id": 86, "city": "东莞", "area": "樟木头镇", "name": "恒大华府", "addr": "樟木头镇东城大道", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.00238, "lng": 113.79509}, {"id": 87, "city": "东莞", "area": "大朗镇", "name": "万科天空之城", "addr": "大朗镇富民中路", "year": 2022, "status": "部分停工", "cause": "万科财务危机", "lat": 23.04747, "lng": 113.78647}, {"id": 88, "city": "东莞", "area": "松山湖", "name": "光大We谷产业园", "addr": "松山湖高新区", "year": 2020, "status": "部分停工", "cause": "开发商资金链断裂", "lat": 23.0377, "lng": 113.79058}, {"id": 89, "city": "东莞", "area": "茶山镇", "name": "纳帕溪谷", "addr": "茶山镇超朗社区", "year": 2019, "status": "停工", "cause": "开发商破产", "lat": 23.05753, "lng": 113.76486}, {"id": 90, "city": "东莞", "area": "石排镇", "name": "利丰中央公园", "addr": "石排镇石排大道", "year": 2018, "status": "停工", "cause": "资金链断裂", "lat": 23.05373, "lng": 113.77895}, {"id": 91, "city": "东莞", "area": "企石镇", "name": "恒大悦龙台", "addr": "企石镇湖滨路", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.0617, "lng": 113.80018}, {"id": 92, "city": "东莞", "area": "横沥镇", "name": "盛和雅颂", "addr": "横沥镇中山路", "year": 2019, "status": "停工", "cause": "开发商资金链断裂", "lat": 23.04608, "lng": 113.78334}, {"id": 93, "city": "东莞", "area": "东坑镇", "name": "四季松湖", "addr": "东坑镇东兴东路", "year": 2020, "status": "停工", "cause": "开发商破产", "lat": 23.04062, "lng": 113.78351}, {"id": 94, "city": "东莞", "area": "寮步镇", "name": "万科时富金色家园", "addr": "寮步镇东升路", "year": 2022, "status": "部分停工", "cause": "万科财务危机", "lat": 23.02783, "lng": 113.76312}, {"id": 95, "city": "东莞", "area": "大岭山镇", "name": "松湖碧桂园", "addr": "大岭山镇石大路", "year": 2021, "status": "部分停工", "cause": "碧桂园债务危机", "lat": 22.99702, "lng": 113.76557}, {"id": 96, "city": "东莞", "area": "长安镇", "name": "恒大珺睿", "addr": "长安镇德政中路", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 22.97695, "lng": 113.76853}, {"id": 97, "city": "东莞", "area": "虎门镇", "name": "恒大滨江左岸", "addr": "虎门镇富民路", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 22.98404, "lng": 113.74873}, {"id": 98, "city": "东莞", "area": "厚街镇", "name": "万达御湖公馆", "addr": "厚街镇湖景大道", "year": 2020, "status": "部分停工", "cause": "万达集团债务危机", "lat": 23.00644, "lng": 113.74185}, {"id": 99, "city": "东莞", "area": "沙田镇", "name": "恒大御景半岛", "addr": "沙田镇滨江路", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 22.97201, "lng": 113.72659}, {"id": 100, "city": "东莞", "area": "道滘镇", "name": "奥园观澜誉峰", "addr": "道滘镇广深高速旁", "year": 2021, "status": "停工", "cause": "奥园集团债务危机", "lat": 22.99248, "lng": 113.72944}, {"id": 101, "city": "惠州", "area": "惠城区", "name": "光耀翡俪港", "addr": "桥东街道上东平小区", "year": 2014, "status": "烂尾12年2026年备案复工", "cause": "光耀集团资金断裂", "lat": 23.11957, "lng": 114.43642}, {"id": 102, "city": "惠州", "area": "惠城区", "name": "和天下天玺湾", "addr": "金山湖湖心岛", "year": 2015, "status": "停工迎来意向投资人", "cause": "和天下集团资金链断裂", "lat": 23.11336, "lng": 114.43025}, {"id": 103, "city": "惠州", "area": "大亚湾", "name": "海景城", "addr": "滨海大道", "year": 2010, "status": "烂尾超10年", "cause": "开发商破产+库存过高", "lat": 23.06509, "lng": 114.48402}, {"id": 104, "city": "惠州", "area": "惠城区", "name": "江北烂尾写字楼群", "addr": "江北CBD片区", "year": 2015, "status": "多栋停工", "cause": "供过于求+资金链断裂", "lat": 23.11519, "lng": 114.42239}, {"id": 105, "city": "惠州", "area": "惠阳区", "name": "恒大棕榈岛", "addr": "淡水街道高尔夫路", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.0756, "lng": 114.43317}, {"id": 106, "city": "惠州", "area": "博罗县", "name": "恒大御景半岛", "addr": "罗阳街道滨江路", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.16511, "lng": 114.40314}, {"id": 107, "city": "惠州", "area": "惠东县", "name": "富力湾", "addr": "稔山镇滨海片区", "year": 2021, "status": "部分停工", "cause": "富力集团债务危机", "lat": 23.0825, "lng": 114.49209}, {"id": 108, "city": "惠州", "area": "大亚湾", "name": "恒大悦龙台", "addr": "大亚湾西区", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.05371, "lng": 114.4788}, {"id": 109, "city": "惠州", "area": "惠城区", "name": "中洲天御", "addr": "河南岸街道金山湖片区", "year": 2020, "status": "部分停工", "cause": "开发商资金链断裂", "lat": 23.12029, "lng": 114.4228}, {"id": 110, "city": "惠州", "area": "惠阳区", "name": "星河丹堤", "addr": "淡水街道星河东五路", "year": 2021, "status": "部分停工", "cause": "星河集团债务危机", "lat": 23.0693, "lng": 114.44482}, {"id": 111, "city": "惠州", "area": "博罗县", "name": "佳兆业东江新城", "addr": "罗阳街道东江南岸", "year": 2020, "status": "部分停工", "cause": "佳兆业集团债务危机", "lat": 23.17153, "lng": 114.4072}, {"id": 112, "city": "惠州", "area": "惠东县", "name": "碧桂园十里银滩", "addr": "稔山镇亚婆角片区", "year": 2021, "status": "部分停工", "cause": "碧桂园债务危机", "lat": 23.08351, "lng": 114.50008}, {"id": 113, "city": "惠州", "area": "大亚湾", "name": "卓越东部蔚蓝海岸", "addr": "大亚湾西区", "year": 2020, "status": "部分停工", "cause": "卓越集团债务危机", "lat": 23.06636, "lng": 114.4839}, {"id": 114, "city": "惠州", "area": "惠城区", "name": "龙光天悦龙庭", "addr": "河南岸街道演达大道", "year": 2019, "status": "停工", "cause": "龙光集团债务危机", "lat": 23.11596, "lng": 114.4322}, {"id": 115, "city": "惠州", "area": "惠阳区", "name": "融创玖樟台", "addr": "淡水街道人民东路", "year": 2021, "status": "停工", "cause": "融创集团债务危机", "lat": 23.07203, "lng": 114.43639}, {"id": 116, "city": "惠州", "area": "博罗县", "name": "新城金樾江南", "addr": "罗阳街道江南大道", "year": 2020, "status": "停工", "cause": "新城控股债务危机", "lat": 23.16635, "lng": 114.39712}, {"id": 117, "city": "惠州", "area": "惠东县", "name": "双月湾文旅项目", "addr": "平海镇双月湾片区", "year": 2020, "status": "多项目停工", "cause": "资金链断裂+疫情影响", "lat": 23.0757, "lng": 114.5031}, {"id": 118, "city": "惠州", "area": "大亚湾", "name": "合生滨海城", "addr": "大亚湾澳头街道", "year": 2018, "status": "停工", "cause": "合生创展债务危机", "lat": 23.05852, "lng": 114.48068}, {"id": 119, "city": "惠州", "area": "惠城区", "name": "保利天汇", "addr": "江北街道文昌一路", "year": 2021, "status": "部分停工", "cause": "保利发展债务危机", "lat": 23.11872, "lng": 114.43648}, {"id": 120, "city": "惠州", "area": "惠阳区", "name": "恒大林溪郡", "addr": "淡水街道白云新城", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.07571, "lng": 114.44425}, {"id": 121, "city": "珠海", "area": "香洲区", "name": "三海大厦", "addr": "情侣路", "year": 2004, "status": "停工", "cause": "资金链断裂", "lat": 22.27763, "lng": 113.58406}, {"id": 122, "city": "珠海", "area": "拱北", "name": "时代广场", "addr": "拱北口岸", "year": 1991, "status": "多次流拍", "cause": "开发商破产", "lat": 22.2487, "lng": 113.59396}, {"id": 123, "city": "珠海", "area": "香洲区", "name": "巨人大厦", "addr": "体育中心旁", "year": 1997, "status": "7层框架烂尾", "cause": "资金链断裂", "lat": 22.27553, "lng": 113.57551}, {"id": 124, "city": "珠海", "area": "香洲区", "name": "鑫苑·盛世明珠", "addr": "石花西路北侧", "year": 2019, "status": "基坑停工", "cause": "鑫苑集团资金紧缺", "lat": 22.27738, "lng": 113.58287}, {"id": 125, "city": "珠海", "area": "金湾区", "name": "名珠花园烂尾楼", "addr": "三灶镇金岛路156号", "year": 1993, "status": "2025年2月拆除", "cause": "年久失修成危房", "lat": 22.22948, "lng": 113.54404}, {"id": 126, "city": "珠海", "area": "香洲区", "name": "心海州中央国际", "addr": "前山片区", "year": 2015, "status": "多次流拍", "cause": "开发商债务危机", "lat": 22.2783, "lng": 113.58103}, {"id": 127, "city": "珠海", "area": "斗门区", "name": "世荣作品壹号", "addr": "井岸镇珠峰大道", "year": 2020, "status": "部分停工", "cause": "世荣兆业债务危机", "lat": 22.32417, "lng": 113.55939}, {"id": 128, "city": "珠海", "area": "金湾区", "name": "航空新城烂尾商业体", "addr": "航空新城片区", "year": 2019, "status": "停工", "cause": "资金链断裂", "lat": 22.22539, "lng": 113.54723}, {"id": 129, "city": "珠海", "area": "香洲区", "name": "吉大烂尾写字楼群", "addr": "吉大街道景山路", "year": 2016, "status": "多栋停工", "cause": "开发商破产", "lat": 22.28403, "lng": 113.58531}, {"id": 130, "city": "珠海", "area": "斗门区", "name": "白蕉烂尾住宅项目", "addr": "白蕉镇虹桥三路", "year": 2018, "status": "停工", "cause": "资金链断裂", "lat": 22.32231, "lng": 113.56063}, {"id": 131, "city": "珠海", "area": "金湾区", "name": "平沙烂尾文旅项目", "addr": "平沙镇海泉湾片区", "year": 2020, "status": "停工", "cause": "资金链断裂", "lat": 22.2324, "lng": 113.5545}, {"id": 132, "city": "珠海", "area": "香洲区", "name": "新香洲烂尾公寓项目", "addr": "新香洲人民西路", "year": 2019, "status": "停工", "cause": "开发商债务危机", "lat": 22.28719, "lng": 113.57519}, {"id": 133, "city": "珠海", "area": "斗门区", "name": "乾务烂尾商业广场", "addr": "乾务镇珠峰大道", "year": 2015, "status": "停工", "cause": "开发商破产", "lat": 22.32402, "lng": 113.56271}, {"id": 134, "city": "珠海", "area": "金湾区", "name": "南水烂尾产业园", "addr": "南水镇南港大道", "year": 2019, "status": "停工", "cause": "资金链断裂", "lat": 22.23319, "lng": 113.55427}, {"id": 135, "city": "珠海", "area": "横琴新区", "name": "横琴口岸烂尾商业综合体", "addr": "横琴口岸片区", "year": 2021, "status": "停工", "cause": "开发商债务危机", "lat": 22.23397, "lng": 113.58383}, {"id": 136, "city": "中山", "area": "火炬开发区", "name": "雅居乐凯茵又一城", "addr": "火炬开发区神涌村", "year": 2021, "status": "部分停工", "cause": "雅居乐集团债务危机", "lat": 22.49373, "lng": 113.40241}, {"id": 137, "city": "中山", "area": "坦洲镇", "name": "锦绣国际花城", "addr": "坦洲镇环洲北路", "year": 2020, "status": "部分停工", "cause": "敏捷集团债务危机", "lat": 22.46733, "lng": 113.37835}, {"id": 138, "city": "中山", "area": "石岐区", "name": "金鹰广场", "addr": "石岐区兴中道", "year": 2019, "status": "停工", "cause": "开发商资金链断裂", "lat": 22.53305, "lng": 113.38204}, {"id": 139, "city": "中山", "area": "东区", "name": "利和广场二期", "addr": "东区中山三路", "year": 2020, "status": "停工", "cause": "利和集团债务危机", "lat": 22.5356, "lng": 113.39161}, {"id": 140, "city": "中山", "area": "西区", "name": "雅居乐剑桥郡", "addr": "西区翠景道", "year": 2021, "status": "部分停工", "cause": "雅居乐集团债务危机", "lat": 22.52452, "lng": 113.36756}, {"id": 141, "city": "中山", "area": "沙溪镇", "name": "龙光玖龙山", "addr": "沙溪镇宝珠西路", "year": 2020, "status": "停工", "cause": "龙光集团债务危机", "lat": 22.5101, "lng": 113.35746}, {"id": 142, "city": "中山", "area": "三乡镇", "name": "雅居乐万象郡", "addr": "三乡镇金涌大道", "year": 2021, "status": "部分停工", "cause": "雅居乐集团债务危机", "lat": 22.46369, "lng": 113.37737}, {"id": 143, "city": "中山", "area": "南朗镇", "name": "恒大悦珑湾", "addr": "南朗镇翠亨新区", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 22.49332, "lng": 113.41897}, {"id": 144, "city": "中山", "area": "黄圃镇", "name": "恒大御府", "addr": "黄圃镇新明北路", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 22.57632, "lng": 113.39493}, {"id": 145, "city": "中山", "area": "小榄镇", "name": "龙光玖誉湾", "addr": "小榄镇民安南路", "year": 2020, "status": "停工", "cause": "龙光集团债务危机", "lat": 22.55897, "lng": 113.3737}, {"id": 146, "city": "江门", "area": "蓬江区", "name": "江晟大厦", "addr": "东华大桥旁", "year": 2000, "status": "空置20年2025年启动改造", "cause": "省七建破产清算", "lat": 22.60529, "lng": 113.08339}, {"id": 147, "city": "江门", "area": "蓬江区", "name": "滨江大道烂尾商业体", "addr": "滨江大道沿线", "year": 2019, "status": "停工", "cause": "开发商资金链断裂", "lat": 22.59944, "lng": 113.09177}, {"id": 148, "city": "江门", "area": "新会区", "name": "古井镇停工工业区配套", "addr": "古井镇古井大道", "year": 2018, "status": "停工", "cause": "资金链断裂", "lat": 22.55562, "lng": 113.08491}, {"id": 149, "city": "江门", "area": "江海区", "name": "恒大御景半岛", "addr": "江海区江海一路", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 22.56745, "lng": 113.10609}, {"id": 150, "city": "江门", "area": "蓬江区", "name": "保利大都会", "addr": "蓬江区滨江新区", "year": 2020, "status": "部分停工", "cause": "保利发展债务危机", "lat": 22.59216, "lng": 113.09717}, {"id": 151, "city": "江门", "area": "新会区", "name": "碧桂园凤凰湾", "addr": "新会区枢纽新城", "year": 2021, "status": "部分停工", "cause": "碧桂园债务危机", "lat": 22.54982, "lng": 113.09413}, {"id": 152, "city": "江门", "area": "鹤山市", "name": "恒大山水城", "addr": "鹤山市沙坪街道", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 22.61985, "lng": 113.06469}, {"id": 153, "city": "江门", "area": "台山市", "name": "恒大名都", "addr": "台山市台城街道", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 22.52307, "lng": 113.0669}, {"id": 154, "city": "江门", "area": "开平市", "name": "碧桂园翡翠湾", "addr": "开平市长沙街道", "year": 2020, "status": "部分停工", "cause": "碧桂园债务危机", "lat": 22.54049, "lng": 113.03881}, {"id": 155, "city": "江门", "area": "恩平市", "name": "恒大泉都", "addr": "恩平市良西镇", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 22.56325, "lng": 113.00633}, {"id": 156, "city": "肇庆", "area": "鼎湖区", "name": "恒大世纪梦幻城", "addr": "肇庆与广州交界", "year": 2021, "status": "多组团烂尾", "cause": "恒大集团债务危机", "lat": 23.06508, "lng": 112.48391}, {"id": 157, "city": "肇庆", "area": "端州区", "name": "御城广场", "addr": "端州七路与龙塘路交汇处", "year": 2022, "status": "停工2026年1月法拍", "cause": "开发商资金断裂", "lat": 23.03496, "lng": 112.46546}, {"id": 158, "city": "肇庆", "area": "高要区", "name": "恒大御景湾", "addr": "高要区南岸街道", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.02763, "lng": 112.48039}, {"id": 159, "city": "肇庆", "area": "四会市", "name": "恒大名都", "addr": "四会市东城街道", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.10511, "lng": 112.48564}, {"id": 160, "city": "肇庆", "area": "鼎湖区", "name": "保利和悦湖畔", "addr": "鼎湖区坑口街道", "year": 2020, "status": "部分停工", "cause": "保利发展债务危机", "lat": 23.07055, "lng": 112.48639}, {"id": 161, "city": "肇庆", "area": "高要区", "name": "碧桂园龙熹山", "addr": "高要区南岸街道", "year": 2021, "status": "部分停工", "cause": "碧桂园债务危机", "lat": 23.02316, "lng": 112.47402}, {"id": 162, "city": "肇庆", "area": "广宁县", "name": "恒大御景半岛", "addr": "广宁县南街街道", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.15596, "lng": 112.46119}, {"id": 163, "city": "肇庆", "area": "怀集县", "name": "恒大世纪绿洲", "addr": "怀集县怀城街道", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.16495, "lng": 112.42282}, {"id": 164, "city": "肇庆", "area": "封开县", "name": "恒大御湖湾", "addr": "封开县江口镇", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.11515, "lng": 112.38841}, {"id": 165, "city": "肇庆", "area": "德庆县", "name": "恒大珑湖湾", "addr": "德庆县德城街道", "year": 2021, "status": "停工", "cause": "恒大集团债务危机", "lat": 23.08286, "lng": 112.41439}];
+
+const M={'广州':{c:'#ff3860',e:'🏙️'},'深圳':{c:'#ff8c42',e:'🌆'},'佛山':{c:'#ffd166',e:'🏯'},'东莞':{c:'#4ecdc4',e:'🏭'},'惠州':{c:'#a78bfa',e:'🏖️'},'珠海':{c:'#f472b6',e:'🌊'},'中山':{c:'#60a5fa',e:'🏘️'},'江门':{c:'#34d399',e:'🌾'},'肇庆':{c:'#fb923c',e:'⛰️'}};
+const cc={};D.forEach(d=>cc[d.city]=(cc[d.city]||0)+1);
+const sc=Object.entries(cc).sort((a,b)=>b[1]-a[1]);
+const mx=sc[0][1];
+
+/* ===== SPLASH ===== */
+// Animated skyline buildings
+!function(){
+  const w=document.getElementById('fallWrap');
+  const colors=['#ff3860','#ff8c42','#ffd166','#a78bfa','#4ecdc4','#60a5fa'];
+  for(let i=0;i<30;i++){
+    const b=document.createElement('div');
+    b.className='fall-bld';
+    const h=40+Math.random()*200,wid=15+Math.random()*30;
+    b.style.cssText=`left:${i*3.4}%;width:${wid}px;height:${h}px;background:linear-gradient(to top,${colors[i%6]}22,${colors[i%6]}08);animation-delay:${Math.random()*1.5}s;animation-duration:${2+Math.random()*2}s`;
+    w.appendChild(b);
+  }
+}();
+
+// Counter
+!function(){const el=document.getElementById('spN');let v=0;const iv=setInterval(()=>{v+=3;if(v>=165)v=165;el.textContent=v;if(v>=165)clearInterval(iv)},16)}();
+
+function go(){document.getElementById('sp').classList.add('out');setTimeout(()=>{document.getElementById('sp').style.display='none';document.getElementById('app').classList.add('on');init()},900)}
+setTimeout(()=>{if(document.getElementById('sp').style.display!=='none')go()},9000);
+
+/* ===== INIT ===== */
+let selC='',map,mkLayer,allMarkers=[];
+function init(){buildCG();buildDonut();buildBars();buildTL();buildCause();buildMF();initMap();buildTbl();initRV();initNav();countUp()}
+
+// City cards
+function buildCG(){
+  const el=document.getElementById('cg');
+  sc.forEach(([c,n])=>{const m=M[c];const d=document.createElement('div');d.className='cc';
+  d.innerHTML=`<span class="e">${m.e}</span><div class="nm">${c}</div><div class="ct" style="color:${m.c}">${n}</div><div class="ut">个烂尾项目</div><div class="bar" style="width:${n/mx*100}%;background:${m.c}"></div>`;
+  d.onclick=()=>{document.querySelectorAll('.cc').forEach(x=>x.classList.remove('act'));if(selC===c){selC=''}else{selC=c;d.classList.add('act')}updMF();updMap();filterTbl()};
+  el.appendChild(d)});
+}
+
+// Donut
+function buildDonut(){
+  const svg=document.getElementById('donut');const leg=document.getElementById('dleg');
+  const total=D.length;let cum=0;
+  const r=70,cx=100,cy=100,circ=2*Math.PI*r;
+  sc.forEach(([c,n],i)=>{const m=M[c];const pct=n/total;const dash=pct*circ;const gap=circ-dash;
+  const circle=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  circle.setAttribute('cx',cx);circle.setAttribute('cy',cy);circle.setAttribute('r',r);
+  circle.setAttribute('fill','none');circle.setAttribute('stroke',m.c);
+  circle.setAttribute('stroke-width','22');
+  circle.setAttribute('stroke-dasharray',`${dash} ${gap}`);
+  circle.setAttribute('stroke-dashoffset',`${-cum}`);
+  circle.setAttribute('transform',`rotate(-90 ${cx} ${cy})`);
+  circle.style.transition='all 1s ease';
+  circle.style.cursor='pointer';
+  circle.onmouseenter=()=>{circle.setAttribute('stroke-width','28');selC=c;updMF();updMap();filterTbl()};
+  circle.onmouseleave=()=>{circle.setAttribute('stroke-width','22')};
+  svg.appendChild(circle);
+  cum+=dash;
+  // Legend
+  const dl=document.createElement('div');dl.className='dl';
+  dl.innerHTML=`<div class="dot" style="background:${m.c}"></div><span class="nm">${m.e} ${c}</span><span class="n">${(pct*100).toFixed(1)}%</span>`;
+  dl.onclick=()=>{selC=selC===c?'':c;updMF();updMap();filterTbl();document.querySelectorAll('.cc').forEach(x=>x.classList.toggle('act',selC===c))};
+  leg.appendChild(dl);
+  });
+}
+
+// Bars
+function buildBars(){
+  const el=document.getElementById('hbs');
+  sc.forEach(([c,n])=>{const m=M[c];const d=document.createElement('div');d.className='hr';
+  d.innerHTML=`<div class="city" style="color:${m.c}">${m.e} ${c}</div><div class="trk"><div class="fl" data-w="${n/mx*100}" style="width:0%;background:linear-gradient(90deg,${m.c},${m.c}77)">${n}</div></div>`;
+  el.appendChild(d)});
+  setTimeout(()=>document.querySelectorAll('.fl').forEach(el=>el.style.width=el.dataset.w+'%'),200);
+}
+
+// Timeline
+function buildTL(){
+  const yc={};D.forEach(d=>yc[d.year]=(yc[d.year]||0)+1);
+  const ys=Object.keys(yc).map(Number).sort(),my=Math.max(...Object.values(yc));
+  const ch=document.getElementById('tlc'),ll=document.getElementById('tll');
+  ys.forEach(y=>{const n=yc[y],h=Math.max(3,n/my*145),r=(y-ys[0])/(ys[ys.length-1]-ys[0]),hue=r*35;
+  const d=document.createElement('div');d.className='tc';
+  d.innerHTML=`<div class="tip"><b>${y}年</b> · ${n}个</div><div class="bar" style="height:${h}px;background:linear-gradient(to top,hsl(${hue},72%,48%),hsl(${hue+15},72%,60%))"></div>`;
+  ch.appendChild(d);
+  const s=document.createElement('span');s.textContent=(y%5===0||y===ys[ys.length-1])?y:'';ll.appendChild(s)});
+}
+
+// Causes
+function buildCause(){
+  const cm={};
+  D.forEach(d=>{let c=d.cause;
+  if(/恒大/.test(c))c='恒大集团债务危机';else if(/碧桂园/.test(c))c='碧桂园债务危机';
+  else if(/万科/.test(c))c='万科财务危机';else if(/融创/.test(c))c='融创集团债务危机';
+  else if(/雅居乐/.test(c))c='雅居乐集团债务危机';else if(/龙光/.test(c))c='龙光集团债务危机';
+  else if(/资金链断裂|资金紧缺|资金不足/.test(c))c='资金链断裂';
+  else if(/破产/.test(c))c='开发商破产';else if(/债务/.test(c))c='其他债务危机';else c='其他';
+  cm[c]=(cm[c]||0)+1});
+  const s=Object.entries(cm).sort((a,b)=>b[1]-a[1]),mc=s[0][1];
+  const co=['#ff3860','#ff8c42','#ffd166','#4ecdc4','#a78bfa','#f472b6','#60a5fa','#34d399','#fb923c','#94a3b8'];
+  const el=document.getElementById('cgr');
+  s.forEach(([nm,n],i)=>{const d=document.createElement('div');d.className='ccd';
+  d.innerHTML=`<div class="rk" style="color:${co[i]}">#${i+1}</div><div class="inf"><div class="nm">${nm}</div><div class="bg"><div class="bf" data-w="${n/mc*100}" style="width:0%;background:${co[i]}"></div></div></div><div class="num" style="color:${co[i]}">${n}</div>`;
+  el.appendChild(d)});
+  setTimeout(()=>document.querySelectorAll('.bf').forEach(el=>el.style.width=el.dataset.w+'%'),350);
+}
+
+// Map
+function buildMF(){
+  const el=document.getElementById('mf');
+  const ab=document.createElement('button');ab.className='on';ab.textContent='全部';
+  ab.onclick=()=>{selC='';updMF();updMap();document.querySelectorAll('.cc').forEach(x=>x.classList.remove('act'))};
+  el.appendChild(ab);
+  sc.forEach(([c])=>{const m=M[c],b=document.createElement('button');b.dataset.c=c;
+  b.textContent=`${m.e} ${c} (${cc[c]})`;
+  b.style.background=selC===c?m.c:'transparent';b.style.color=selC===c?'#fff':selC?'var(--t2)':'';
+  b.onclick=()=>{selC=selC===c?'':c;updMF();updMap();filterTbl();document.querySelectorAll('.cc').forEach(x=>x.classList.toggle('act',selC===c))};
+  el.appendChild(b)});
+}
+function updMF(){document.querySelectorAll('.mf button').forEach(b=>{
+  if(!b.dataset.c){b.classList.toggle('on',selC==='');b.style.background=selC===''?'var(--r)':'transparent';b.style.color=selC===''?'#fff':'var(--t2)';return}
+  const on=selC===b.dataset.c;b.classList.toggle('on',on);b.style.background=on?M[b.dataset.c].c:'transparent';b.style.color=on?'#fff':selC?'var(--t2)':'var(--t2)'
+})}
+
+function initMap(){
+  map=L.map('map',{center:[22.85,113.55],zoom:8,zoomControl:true,attributionControl:false});
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:18}).addTo(map);
+  mkLayer=L.layerGroup().addTo(map);updMap();
+}
+
+function updMap(){
+  mkLayer.clearLayers();allMarkers=[];
+  const items=selC?D.filter(d=>d.city===selC):D;
+  items.forEach(d=>{
+    const m=M[d.city];
+    const marker=L.circleMarker([d.lat,d.lng],{
+      radius:6,fillColor:m.c,fillOpacity:.7,color:m.c,weight:1.5,opacity:.9
+    });
+    let bc='bg-r';if(d.status.includes('复工')||d.status.includes('交付'))bc='bg-g';else if(d.status.includes('部分'))bc='bg-o';
+    marker.bindPopup(`<div style="min-width:200px"><div style="font-size:14px;font-weight:800;color:${m.c};margin-bottom:6px">${m.e} ${d.name}</div><div style="font-size:11px;color:#aaa;margin-bottom:4px">${d.city} · ${d.area} · ${d.addr}</div><div style="margin-bottom:4px"><span class="${bc}" style="font-size:10px;padding:2px 8px;border-radius:10px">${d.status}</span></div><div style="font-size:10px;color:#888">停工年份：${d.year}<br>核心成因：${d.cause}</div></div>`);
+    marker.addTo(mkLayer);allMarkers.push(marker);
+  });
+  if(selC){const items2=D.filter(d=>d.city===selC);if(items2.length){const lat=items2.reduce((s,d)=>s+d.lat,0)/items2.length;const lng=items2.reduce((s,d)=>s+d.lng,0)/items2.length;map.setView([lat,lng],11,{animate:true})}}
+  else map.setView([22.85,113.55],8,{animate:true});
+}
+
+// Table
+let sk='id',sd=1;
+function buildTbl(){
+  const cf=document.getElementById('tCF');
+  sc.forEach(([c])=>{const o=document.createElement('option');o.value=c;o.textContent=c;cf.appendChild(o)});
+  document.getElementById('tS').oninput=filterTbl;
+  document.getElementById('tCF').onchange=filterTbl;
+  document.getElementById('tSF').onchange=filterTbl;
+  document.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{const k=th.dataset.k;if(sk===k)sd*=-1;else{sk=k;sd=1}document.querySelectorAll('th').forEach(t=>t.classList.remove('so'));th.classList.add('so');filterTbl()});
+  filterTbl();
+}
+function filterTbl(){
+  let items=[...D];
+  const q=document.getElementById('tS').value.toLowerCase(),cf=document.getElementById('tCF').value,sf=document.getElementById('tSF').value;
+  if(q)items=items.filter(d=>(d.name+d.addr+d.cause+d.area).toLowerCase().includes(q));
+  if(cf)items=items.filter(d=>d.city===cf);
+  if(sf){if(sf==='停工')items=items.filter(d=>d.status.includes('停工')&&!d.status.includes('部分'));else if(sf==='烂尾')items=items.filter(d=>d.status.includes('烂尾'));else if(sf==='部分停工')items=items.filter(d=>d.status.includes('部分'));else if(sf==='复工')items=items.filter(d=>d.status.includes('复工')||d.status.includes('交付'))}
+  if(selC)items=items.filter(d=>d.city===selC);
+  items.sort((a,b)=>{let va=a[sk],vb=b[sk];return typeof va==='string'?va.localeCompare(vb)*sd:(va-vb)*sd});
+  document.getElementById('tCnt').textContent=items.length+' 条';
+  document.getElementById('tB').innerHTML=items.map(d=>{const m=M[d.city];let bc='bg-r';if(d.status.includes('复工')||d.status.includes('交付'))bc='bg-g';else if(d.status.includes('部分'))bc='bg-o';
+  return `<tr><td style="color:var(--t2)">${d.id}</td><td><span style="color:${m.c};font-weight:700">${m.e} ${d.city}</span></td><td>${d.area}</td><td style="font-weight:600">${d.name}</td><td>${d.year}</td><td><span class="${bc}">${d.status}</span></td><td><span class="tg">${d.cause}</span></td></tr>`}).join('');
+}
+
+function initRV(){const ob=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('vis');ob.unobserve(e.target)}})},{threshold:.08});document.querySelectorAll('.rv').forEach(el=>ob.observe(el))}
+function initNav(){const ls=document.querySelectorAll('.nav a'),ids=['hero','sCity','sDonut','sBar','sTL','sCause','mapSec','sTbl'];onscroll=()=>{let cur='';ids.forEach(id=>{const el=document.getElementById(id);if(el&&el.getBoundingClientRect().top<90)cur=id});ls.forEach(l=>l.classList.toggle('hi','#'+cur===l.getAttribute('href')))}}
+function countUp(){const ob=new IntersectionObserver(es=>{es.forEach(e=>{if(!e.isIntersecting)return;const el=e.target.querySelector('[data-c]');if(!el)return;const t=+el.dataset.c;let v=0;const s=Math.ceil(t/30);const iv=setInterval(()=>{v=Math.min(v+s,t);el.textContent=v;if(v>=t)clearInterval(iv)},22);ob.unobserve(e.target)})},{threshold:.4});document.querySelectorAll('.kpi').forEach(el=>ob.observe(el))}
+</script>
+</body>
+</html>
